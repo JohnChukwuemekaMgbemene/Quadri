@@ -1,0 +1,5 @@
+cdsapi>=0.7.7
+xarray>=2024.10.0
+netCDF4>=1.7.2
+google-api-python-client>=2.150.0
+google-auth>=2.35.0
