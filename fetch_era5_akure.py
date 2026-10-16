@@ -14,6 +14,7 @@ import random
 import sys
 import tempfile
 import time
+import zipfile
 from pathlib import Path
 from typing import Any
 
@@ -56,12 +57,36 @@ BASE_RETRY_WAIT_SECONDS = 30
 MAX_RETRY_WAIT_SECONDS = 900
 CHUNK_SIZE = 8 * 1024 * 1024
 
-logging.basicConfig(
-    level=os.getenv("LOG_LEVEL", "INFO").upper(),
-    format="%(asctime)s | %(levelname)s | %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S",
-)
 log = logging.getLogger("era5-akure")
+
+
+def load_local_dotenv() -> None:
+    env_path = Path(__file__).with_name(".env")
+    if not env_path.is_file():
+        return
+
+    for raw_line in env_path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+
+        name, value = line.split("=", 1)
+        name = name.strip()
+        value = value.strip()
+        if not name or name in os.environ:
+            continue
+
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in {'"', "'"}:
+            value = value[1:-1]
+        os.environ[name] = value
+
+
+def configure_logging() -> None:
+    logging.basicConfig(
+        level=os.getenv("LOG_LEVEL", "INFO").upper(),
+        format="%(asctime)s | %(levelname)s | %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    )
 
 
 def required_env(name: str) -> str:
@@ -137,6 +162,29 @@ def find_file(service, parent_id: str, filename: str) -> dict[str, Any] | None:
         return None
     matches.sort(key=lambda item: item.get("modifiedTime", ""), reverse=True)
     return matches[0]
+
+
+def extract_downloaded_file(path: Path) -> Path:
+    if not path.exists():
+        raise FileNotFoundError(f"Downloaded file not found: {path}")
+
+    if zipfile.is_zipfile(path):
+        extraction_dir = path.parent / f"{path.stem}_extracted"
+        extraction_dir.mkdir(exist_ok=True)
+        with zipfile.ZipFile(path, "r") as archive:
+            members = [member for member in archive.namelist() if member.lower().endswith(".nc")]
+            if not members:
+                raise RuntimeError(f"Downloaded zip archive {path.name} does not contain any .nc files")
+            archive.extract(members[0], extraction_dir)
+
+        extracted_path = extraction_dir / Path(members[0]).name
+        if not extracted_path.exists():
+            extracted_path = extraction_dir / members[0]
+        if extracted_path.exists():
+            return extracted_path
+        raise RuntimeError(f"Extracted NetCDF file not found for {path.name}")
+
+    return path
 
 
 def md5_file(path: Path) -> str:
@@ -265,9 +313,10 @@ def process_month(client, drive, root_id: str, year: int, month: int) -> str:
             with tempfile.TemporaryDirectory(prefix="era5_akure_") as temp_dir:
                 path = Path(temp_dir) / filename
                 client.retrieve(DATASET, request, str(path))
-                hours, found = validate_netcdf(path, year, month)
+                extracted_path = extract_downloaded_file(path)
+                hours, found = validate_netcdf(extracted_path, year, month)
                 log.info("[valid] %s: %d timestamps; variables: %s", filename, hours, ", ".join(found))
-                upload_and_verify(drive, path, year_folder, filename)
+                upload_and_verify(drive, extracted_path, year_folder, filename)
             log.info("[done] %s", filename)
             return "downloaded"
         except Exception as exc:
@@ -282,6 +331,8 @@ def process_month(client, drive, root_id: str, year: int, month: int) -> str:
 
 
 def main() -> int:
+    load_local_dotenv()
+    configure_logging()
     parser = argparse.ArgumentParser(description="Download monthly ERA5 files to Google Drive")
     parser.add_argument("--year", type=int, help="Test or rerun one specific year")
     parser.add_argument("--start-month", type=int, default=1)

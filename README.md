@@ -27,7 +27,7 @@ Use Python 3.11+:
 pip install -r requirements.txt
 ```
 
-Set the environment variables in your shell or load them using your preferred `.env` loader. Do not commit a real `.env` file.
+Set the environment variables in your shell or keep them in a local `.env` file next to `fetch_era5_akure.py`; the script loads that file automatically when present. Do not commit a real `.env` file.
 
 Test one month (December 2025):
 
