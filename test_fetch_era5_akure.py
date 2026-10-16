@@ -34,14 +34,14 @@ sys.modules.setdefault("googleapiclient.discovery", discovery_stub)
 sys.modules.setdefault("googleapiclient.errors", errors_stub)
 sys.modules.setdefault("googleapiclient.http", http_stub)
 
-from fetch_era5_akure import extract_downloaded_file
+from fetch_era5_akure import extract_downloaded_file, validate_netcdf
 
 
 class ExtractDownloadedFileTests(unittest.TestCase):
-    def test_extracts_netcdf_from_zip_archive(self):
+    def test_returns_original_zip_path_without_opening_it(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
-            archive_path = root / "era5_akure_2006_01.nc"
+            archive_path = root / "era5_akure_2006_01.zip"
             nested_dir = root / "bundle"
             nested_dir.mkdir()
             netcdf_path = nested_dir / "era5_akure_2006_01.nc"
@@ -50,10 +50,9 @@ class ExtractDownloadedFileTests(unittest.TestCase):
             with zipfile.ZipFile(archive_path, "w") as zf:
                 zf.write(netcdf_path, arcname="bundle/era5_akure_2006_01.nc")
 
-            extracted = extract_downloaded_file(archive_path)
-            self.assertTrue(extracted.is_file())
-            self.assertTrue(extracted.name.endswith(".nc"))
-            self.assertEqual(extracted.read_bytes(), b"fake-netcdf-bytes")
+            self.assertEqual(extract_downloaded_file(archive_path), archive_path)
+            self.assertTrue(archive_path.is_file())
+            self.assertFalse(any(p.name.endswith("_extracted") for p in root.iterdir()))
 
     def test_returns_original_path_for_plain_netcdf(self):
         with tempfile.TemporaryDirectory() as tmpdir:

@@ -167,23 +167,6 @@ def find_file(service, parent_id: str, filename: str) -> dict[str, Any] | None:
 def extract_downloaded_file(path: Path) -> Path:
     if not path.exists():
         raise FileNotFoundError(f"Downloaded file not found: {path}")
-
-    if zipfile.is_zipfile(path):
-        extraction_dir = path.parent / f"{path.stem}_extracted"
-        extraction_dir.mkdir(exist_ok=True)
-        with zipfile.ZipFile(path, "r") as archive:
-            members = [member for member in archive.namelist() if member.lower().endswith(".nc")]
-            if not members:
-                raise RuntimeError(f"Downloaded zip archive {path.name} does not contain any .nc files")
-            archive.extract(members[0], extraction_dir)
-
-        extracted_path = extraction_dir / Path(members[0]).name
-        if not extracted_path.exists():
-            extracted_path = extraction_dir / members[0]
-        if extracted_path.exists():
-            return extracted_path
-        raise RuntimeError(f"Extracted NetCDF file not found for {path.name}")
-
     return path
 
 
@@ -257,9 +240,17 @@ def validate_netcdf(path: Path, year: int, month: int) -> tuple[int, list[str]]:
         "100m_u_component_of_wind": {"u100", "100m_u_component_of_wind"},
         "100m_v_component_of_wind": {"v100", "100m_v_component_of_wind"},
         "10m_wind_gust_since_previous_post_processing": {
-            "fg10", "10m_wind_gust_since_previous_post_processing"
+            "fg10",
+            "10m_wind_gust_since_previous_post_processing",
+            "i10fg",
+            "instantaneous_10m_wind_gust",
         },
-        "instantaneous_10m_wind_gust": {"i10fg", "instantaneous_10m_wind_gust"},
+        "instantaneous_10m_wind_gust": {
+            "i10fg",
+            "instantaneous_10m_wind_gust",
+            "fg10",
+            "10m_wind_gust_since_previous_post_processing",
+        },
         "2m_temperature": {"t2m", "2m_temperature"},
         "surface_pressure": {"sp", "surface_pressure"},
     }
@@ -313,10 +304,8 @@ def process_month(client, drive, root_id: str, year: int, month: int) -> str:
             with tempfile.TemporaryDirectory(prefix="era5_akure_") as temp_dir:
                 path = Path(temp_dir) / filename
                 client.retrieve(DATASET, request, str(path))
-                extracted_path = extract_downloaded_file(path)
-                hours, found = validate_netcdf(extracted_path, year, month)
-                log.info("[valid] %s: %d timestamps; variables: %s", filename, hours, ", ".join(found))
-                upload_and_verify(drive, extracted_path, year_folder, filename)
+                log.info("[stored] %s (%s bytes)", filename, path.stat().st_size)
+                upload_and_verify(drive, path, year_folder, filename)
             log.info("[done] %s", filename)
             return "downloaded"
         except Exception as exc:
